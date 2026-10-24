@@ -1,0 +1,25 @@
+{
+  "name": "valen-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start":    "node --experimental-vm-modules dist/index.js",
+    "dev":      "tsx watch src/index.ts",
+    "build":    "tsc --project tsconfig.json",
+    "typecheck":"tsc --noEmit",
+    "test":     "vitest run",
+    "test:watch":"vitest"
+  },
+  "dependencies": {
+    "dotenv":  "^17.4.2",
+    "fastify": "^5.12.3",
+    "viem":    "^2.56.3"
+  },
+  "devDependencies": {
+    "@types/node":        "^22.20.2",
+    "@vitest/coverage-v8":"^3.2.4",
+    "tsx":                "^4.23.13",
+    "typescript":         "^7.0.2",
+    "vitest":             "^3.2.4"
+  }
+}

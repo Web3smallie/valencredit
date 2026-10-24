@@ -1,0 +1,43 @@
+# Foundry compiler files
+
+cache/
+out/
+
+# Logs and local development
+
+.logs/
+.ignore/
+
+# Temporary OpenZeppelin clones
+
+oz-temp/
+oz-upgrades-temp/
+
+# Broadcast and deployment artifacts
+
+broadcast/
+
+# Environment files and secrets
+
+.env
+.env.*
+!.env.example
+
+# Dependencies
+
+backend/node_modules/
+node_modules/
+
+# Private keys and local credentials
+
+*.pem
+*.key
+.secrets/
+
+# Historical builds and local snapshots
+previous-builds/
+storage-snapshots/
+abd4225.patch
+
+# Local broadcast logs
+**/broadcast.log.json
