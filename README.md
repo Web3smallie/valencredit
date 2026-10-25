@@ -2,14 +2,14 @@
 
 ### Credit for AI Agents. Earned Through Economic Activity.
 
-**The programmable credit protocol for the autonomous economy.**
+**The programmable credit and lending protocol for independently created AI agents.**
 
 [![Built on Arc](https://img.shields.io/badge/Built%20on-Arc-6554C0)](https://arc.network/)
 [![Solidity](https://img.shields.io/badge/Solidity-Smart%20Contracts-363636?logo=solidity)](https://soliditylang.org/)
 [![Foundry](https://img.shields.io/badge/Toolchain-Foundry-orange)](https://getfoundry.sh/)
 [![USDC](https://img.shields.io/badge/Settlement-USDC-2775CA)](https://www.circle.com/usdc)
 [![ERC-8004](https://img.shields.io/badge/Identity-ERC--8004-blue)](https://eips.ethereum.org/EIPS/eip-8004)
-[![ERC-8183](https://img.shields.io/badge/Commerce-ERC--8183-purple)](https://eips.ethereum.org/)
+[![ERC-8183](https://img.shields.io/badge/Commerce-ERC--8183-purple)](https://eips.ethereum.org/EIPS/eip-8183)
 
 **Repository:** [Web3smallie/valencredit](https://github.com/Web3smallie/valencredit)
 
@@ -27,15 +27,17 @@ A newly deployed agent might be capable of completing valuable work, receiving p
 
 The result is a fundamental mismatch:
 
-* **Economic capability does not automatically translate into creditworthiness.**
-* **A wallet balance is not the same as a credit history.**
-* **Verified revenue can be more informative than an arbitrary starting balance.**
-* **Changing an operational wallet should not necessarily erase an agent's accumulated financial history.**
-* **Lending to autonomous systems requires programmable rules, transparent accounting, and enforceable repayment mechanics.**
+- **Economic capability does not automatically translate into creditworthiness.**
+- **A wallet balance is not the same as a credit history.**
+- **Verified revenue can be more informative than an arbitrary starting balance.**
+- **Changing an operational wallet should not necessarily erase an agent's accumulated financial history.**
+- **Lending to autonomous systems requires programmable rules, transparent accounting, and enforceable repayment mechanics.**
 
 As more commerce moves toward autonomous execution, agents will need more than wallets.
 
 They will need financial infrastructure that understands their identity, activity, obligations, and repayment history.
+
+---
 
 ## The Solution: Valen
 
@@ -47,613 +49,409 @@ Instead of treating every new wallet as an entirely unknown borrower, Valen main
 
 An agent's credit profile can incorporate its repayment record and verified economic activity. That history informs its available credit, subject to protocol rules and risk controls.
 
-The fundamental idea is simple:
-
 > **An AI agent should be able to build financial credibility through what it demonstrably earns and repays.**
 
-Valen does not create, own, or operate the agents that use it. It provides the financial infrastructure through which independently developed agents can access programmable credit.
+Valen does not create, own, operate, or run a marketplace of agents. It provides the financial infrastructure through which independently developed agents can access programmable credit.
 
-### The Valen credit cycle
+---
 
-```text
-      INDEPENDENT AI AGENT
-                |
-                v
-       REGISTER IDENTITY
-                |
-                v
-       ESTABLISH CREDIT PROFILE
-                |
-                v
-       REQUEST PROGRAMMABLE LOAN
-                |
-                v
-       VALIDATE CREDIT & TERMS
-                |
-                v
-       FUND APPROVED LOAN
-                |
-                v
-       EXECUTE ECONOMIC WORK
-                |
-                v
-       GENERATE VERIFIABLE REVENUE
-                |
-                v
-       REPAY THROUGH VALEN
-                |
-                v
-       UPDATE CREDIT HISTORY
-                |
-                v
-       INFORM FUTURE CREDIT DECISIONS
-                |
-                +--------------------+
-                                     |
-                                     v
-                              NEXT CREDIT CYCLE
+## On-Chain Verification Report
+
+> **[Read the Valen V1 On-Chain Verification Report](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md)**
+
+The verification report documents the complete state of the V1 deployment, verified by read-only on-chain calls to Arc Testnet at block 68,946,770 (2026-10-25). It includes:
+
+- All 11 proxy addresses and their current ERC-1967 implementation addresses
+- Full contract wiring and configuration verification against `Deploy.s.sol`
+- 13 end-to-end lifecycle transaction hashes with explorer links
+- Loan state: `totalRecovered = 11,000,000`, `repaidHandled = true`, EURC collateral `resolved = true`
+- Credit record for agentId 1: `loansRepaid = 1`, `currentLimit = 8,850,000`
+- Outstanding accounting items requiring further review before any state-changing action
+
+---
+
+## The Lending Lifecycle
+
+Valen's lending lifecycle combines on-chain contract state with off-chain coordination at specific steps. The table below identifies which operations happen entirely on-chain and which require off-chain infrastructure such as an indexer, authorized attester, or keeper bot.
+
+| Step | Operation | On-chain | Off-chain required |
+|------|-----------|----------|--------------------|
+| 1 | Register agent identity via `AgentRegistry` | Yes | — |
+| 2 | Store ERC-8004 token ID reference | Yes (informational only) | ERC-8004 identity minted externally |
+| 3 | Submit ERC-8183 economic activity via `ActivityAttester` | Yes (attestation) | Indexer to observe `PaymentReleased`; authorized attester to submit |
+| 4 | Credit assessment via `CreditRegistry` | Yes (storage read) | — |
+| 5 | Deposit collateral to `CollateralVault` | Yes | — |
+| 6 | Request loan via `LoanRegistry` | Yes | — |
+| 7 | Pool funding via `LoanVault.fundFromPool` | Yes | Contract owner or registered keeper must call (`registry.keepers(msg.sender)`) |
+| 8 | Milestone release via `LoanVault.releaseMilestone` | Yes | Lender (or pool owner for pool loans) must call; reverts if `directDisbursement = true` |
+| 9 | Repayment via `RevenueRouter.repayLoan` | Yes | — |
+| 10 | Pool accounting via `LiquidityPool.reconcileLoan` | Yes (permissionless) | Anyone can call; not automatic |
+| 11 | Credit history update via `CreditRegistry.recordRepayment` | Yes (called by RevenueRouter) | — |
+
+### Lifecycle Diagram
+
+```mermaid
+sequenceDiagram
+    participant Agent
+    participant AgentRegistry
+    participant CreditRegistry
+    participant CollateralVault
+    participant RecipientRegistry
+    participant LoanRegistry
+    participant LoanVault
+    participant LiquidityPool
+    participant RevenueRouter
+
+    Agent->>AgentRegistry: registerAgent(erc8004TokenId)
+    AgentRegistry-->>Agent: agentId = 1
+
+    Note over Agent,CollateralVault: Collateral path (used in V1 E2E test)
+    Agent->>CollateralVault: depositCollateral(EURC, amount)
+    Agent->>RecipientRegistry: (deployer approves agent wallet)
+
+    Agent->>LoanRegistry: requestLoan(proposal)
+    LoanRegistry->>CollateralVault: reserveCollateral(loanId, borrower, asset, amount, principal)
+    LoanRegistry-->>Agent: loanId = 0, status = Requested
+
+    Note over LoanVault,LiquidityPool: Pooled funding path (owner or keeper calls fundFromPool)
+    LoanVault->>LiquidityPool: fundLoan(loanId, principal)
+    LiquidityPool-->>LoanVault: transfers principal USDC
+    LoanVault->>LoanRegistry: markFunded(loanId, liquidityPool) → status = Active
+    LoanVault->>Agent: DirectDisbursementSent (full principal to creditWallet)
+
+    Note over LoanVault,LoanRegistry: releaseMilestone applies to non-direct-disbursement loans only
+
+    Agent->>RevenueRouter: repayLoan(loanId, 11_000_000)
+    RevenueRouter->>LiquidityPool: transfers lenderShare USDC
+    RevenueRouter->>LoanRegistry: markRepaid → status = Repaid
+    RevenueRouter->>CreditRegistry: recordRepayment(agentId, amount, early=true)
+    LoanRegistry->>CollateralVault: release(loanId) → collateral returned
+
+    Note over LiquidityPool: Permissionless; not automatic
+    Agent->>LiquidityPool: reconcileLoan(loanId)
+    LiquidityPool-->>LiquidityPool: idleLedger updated, finalized = true
 ```
 
-This is the foundation of an agent-native financial system in which credit capacity can respond to verifiable economic behavior rather than remain permanently tied to an initial wallet balance.
-
 ---
 
-## Why Valen Is Different
-
-### 1. Credit belongs to an agent identity, not merely a wallet
-
-Wallets are operational accounts. They are not necessarily durable representations of an economic actor.
-
-Valen introduces its own persistent `agentId` through `AgentRegistry`.
-
-The registry associates an agent identity with its owner and authorized wallets. Credit records are scoped to the agent identity, allowing authorized wallet changes without automatically resetting the agent's financial history.
-
-This separates two concepts that should not be confused:
-
-* **Identity:** The persistent entity whose financial history is maintained.
-* **Wallet:** An authorized address used to interact with the protocol.
-
-Valen also integrates with ERC-8004, the Ethereum standard for AI agent identity, reputation, and validation.
-
-ERC-8004 provides an external identity reference. Valen's own `agentId` remains distinct from the ERC-8004 token ID, so the two identity systems are not interchangeable.
-
-This distinction allows Valen to maintain its own credit-accounting rules without making its internal credit history dependent on the transferability of an external identity NFT.
-
-### 2. Economic activity can contribute to credit capacity
-
-An agent's ability to complete paid work can provide evidence relevant to its financial profile.
-
-Valen's activity-verification architecture integrates with ERC-8183, the Agentic Commerce Protocol.
-
-ERC-8183's `PaymentReleased` event provides an on-chain signal that a provider received payment for completed work.
-
-Valen's `ActivityAttester` is designed to accept activity attestations from authorized attesters, validate the approved source and agent-wallet relationship, prevent duplicate activity records, and record verified activity in the credit system.
-
-The intended flow is:
-
-```text
-Agent completes paid work
-          |
-          v
-ERC-8183 job reaches payment release
-          |
-          v
-PaymentReleased event
-          |
-          v
-Authorized activity attester
-          |
-          v
-Validate approved source
-          |
-          v
-Validate agent wallet authorization
-          |
-          v
-Reject duplicate activity evidence
-          |
-          v
-Record verified economic activity
-          |
-          v
-Update agent credit profile
-```
-
-**Why this matters:** Credit decisions can incorporate evidence of economic performance, rather than relying exclusively on an agent's existing token balance.
-
-An on-chain payment event is not, by itself, proof of profitability, future repayment, or freedom from fraud. Valen uses verified activity as one input into its credit model, not as a guarantee that every agent deserves a loan.
-
-### 3. Credit capacity can evolve over time
-
-Valen's credit model is designed to account for both repayment behavior and verified economic activity.
-
-Its V1 design specifies:
-
-* Credit history maintained against a persistent agent identity.
-* Credit capacity informed by repayment performance.
-* Activity-derived credit increases subject to protocol-defined limits.
-* Exposure tracking to account for outstanding principal.
-* Credit reductions in response to qualifying defaults.
-* Persistent historical records of verified activity and repayments.
-
-The implementation specification defines an activity-growth rate of 500 basis points, or 5%, and a maximum activity-derived credit increase of 500 USDC per event.
-
-It also specifies a lifetime ceiling of 50,000 USDC for the activity-derived component.
-
-These are protocol design parameters, not a promise that every agent will receive those amounts. Actual credit availability depends on the deployed implementation, the agent's state, and the applicable contract rules.
-
-### 4. Lending is programmable and enforceable on-chain
-
-Valen is not simply a system that assigns an agent a credit score.
-
-It connects credit validation to actual lending operations.
-
-A loan request specifies terms and conditions that the protocol can validate. The loan lifecycle is represented in contract state, while funding, collateral handling, milestone releases, and repayment are executed through dedicated components.
-
-This creates a foundation for programmable credit facilities that can be integrated into agent applications and autonomous commerce workflows.
-
-### 5. Revenue and repayment can follow explicit rules
-
-Valen includes `RevenueRouter` to coordinate revenue-related repayment flows.
-
-The design supports routing funds toward outstanding debt and returning surplus funds to the designated agent credit wallet according to the applicable repayment rules.
-
-Rather than treating repayment as an informal promise, the protocol provides on-chain mechanisms for accounting and settlement.
-
-Valen's credit model and repayment mechanics are designed to reinforce one another: repayment history becomes part of the agent's financial record, which can inform future credit decisions.
-
-### 6. Multiple capital and risk-management components
-
-Valen's architecture includes dedicated components for liquidity, collateral, underwriting, recipient validation, and reserves.
-
-These include:
-
-| Component           | Responsibility                                                                |
-| ------------------- | ----------------------------------------------------------------------------- |
-| `AgentRegistry`     | Maintains Valen agent identities and authorized wallets.                      |
-| `CreditRegistry`    | Maintains credit records, limits, and relevant credit-history data.           |
-| `LoanRegistry`      | Manages loan records, terms, and loan-state validation.                       |
-| `LoanVault`         | Coordinates loan funding and milestone disbursement mechanics.                |
-| `CollateralVault`   | Manages collateral associated with supported loan arrangements.               |
-| `LiquidityPool`     | Supports pool-funded lending and liquidity accounting.                        |
-| `UnderwriterPool`   | Provides underwriting-related protocol functionality.                         |
-| `RecipientRegistry` | Controls which recipient addresses are approved for relevant loan operations. |
-| `ReservePool`       | Supports reserve-related accounting and contribution flows.                   |
-| `RevenueRouter`     | Coordinates revenue routing and loan repayment.                               |
-| `ActivityAttester`  | Records authorized attestations of verified economic activity.                |
-
-These components form the foundation for a modular lending protocol rather than placing every financial responsibility inside one oversized contract.
-
----
-
-## How Valen Works
-
-### Step 1 — An independent agent establishes its identity
-
-An agent registers through `AgentRegistry` and receives a persistent Valen `agentId`.
-
-The identity is associated with an owner and authorized wallet addresses.
-
-The agent can use the identity to maintain a consistent credit record across supported wallet changes.
-
-ERC-8004 is part of Valen's identity integration, but the Valen `agentId` remains the identifier used for Valen's internal credit history.
-
-### Step 2 — Valen evaluates the agent's credit position
-
-The credit system maintains the information needed to determine available credit under protocol rules.
-
-Depending on the agent's history, the credit profile can incorporate:
-
-* Current credit capacity.
-* Verified economic activity.
-* Repayment history.
-* Outstanding exposure.
-* Relevant default outcomes.
-
-The credit registry and loan registry work together to ensure loan requests are evaluated against the applicable credit constraints.
-
-### Step 3 — The agent requests a loan
-
-The agent submits a loan proposal specifying the requested amount, repayment terms, relevant collateral information, recipient details, and milestone instructions supported by the protocol.
-
-The protocol validates the proposal against its rules.
-
-A request is not equivalent to an approved or funded loan: the relevant checks and funding operations must succeed.
-
-### Step 4 — The loan is funded
-
-Valen supports a lending architecture that includes pool-funded loans and dedicated loan-vault operations.
-
-Where the required pool configuration and liquidity are available, the loan can be funded through the supported pool pathway.
-
-Funding is recorded on-chain, providing an auditable record of the loan operation.
-
-### Step 5 — Funds are released according to the loan structure
-
-Valen includes milestone-based disbursement functionality.
-
-Rather than assuming every loan must be disbursed in one unrestricted transfer, the protocol can represent approved milestones and release funds through its configured loan mechanics.
-
-This provides a foundation for loans tied to specific work or operational requirements.
-
-### Step 6 — The agent generates economic activity
-
-An agent can operate independently of Valen and earn revenue through supported external services or commerce protocols.
-
-Where the activity-verification path is configured and supported, ERC-8183 payment-release evidence can be submitted through authorized attestation mechanisms.
-
-Valen does not need to own the agent or operate the marketplace where the agent earns revenue.
-
-### Step 7 — Verified activity informs credit capacity
-
-The authorized attestation process checks the relevant source and wallet authorization, applies duplicate-prevention rules, and records the accepted activity against the agent's identity.
-
-The credit system can then account for that activity according to its configured growth rules and limits.
-
-### Step 8 — The agent repays its loan
-
-The agent can repay through the supported repayment flow.
-
-`RevenueRouter` coordinates applicable repayment accounting, including routing funds toward the outstanding obligation and handling any surplus according to the protocol's rules.
-
-Successful repayment contributes to the agent's financial history.
-
-### Step 9 — The agent builds a financial track record
-
-Over successive credit cycles, the agent's financial profile can reflect its verified activity, repayment behavior, and default history.
-
-This creates the foundation for a system in which access to credit can become more responsive to demonstrated economic behavior.
-
----
-
-## Architecture
-
-Valen separates identity, credit evaluation, loan state, capital management, revenue routing, and activity verification into distinct contract responsibilities.
-
-```text
-                    EXTERNAL AI AGENT
-                            |
-                            v
-                     AgentRegistry
-                            |
-                            v
-                     CreditRegistry
-                            ^
-                            |
-                      LoanRegistry
-                            |
-                            v
-                        LoanVault
-                       /         \
-                      v           v
-               LiquidityPool  CollateralVault
-                      |
-                      v
-                 Loan Funding
-
-
-EXTERNAL PAID WORK
-        |
-        v
-ERC-8183 PaymentReleased
-        |
-        v
-ActivityAttester <---- Approved Sources
-        |
-        v
-CreditRegistry
-        |
-        v
-Agent Credit Profile
-
-
-AGENT REPAYMENT
-        |
-        v
-RevenueRouter
-        |
-        +------> Outstanding Loan / Lender
-        |
-        +------> Agent Credit Wallet (applicable surplus)
-        |
-        v
-Credit History Updates
-```
-
-### Architectural principles
-
-**Persistent identity:** Credit history is associated with an agent identity rather than being inherently tied to one operational address.
-
-**Explicit trust boundaries:** Activity attestation relies on authorized attesters and approved source contracts. The protocol's on-chain validation and duplicate-prevention mechanisms do not eliminate every off-chain trust assumption.
-
-**Separation of responsibilities:** Identity, credit, loan state, liquidity, collateral, revenue routing, and activity verification are handled by distinct components.
-
-**Programmable enforcement:** Financial operations are governed by smart-contract state and validation rules.
-
-**Composable integrations:** ERC-8004 and ERC-8183 connect Valen to emerging standards for agent identity and agentic commerce.
-
-**Auditable execution:** Relevant financial operations and accepted state changes can be inspected through on-chain transactions and events.
-
----
-
-## Technology Stack
-
-| Technology   | Role                                                                  |
-| ------------ | --------------------------------------------------------------------- |
-| Arc          | Blockchain settlement environment for Valen's deployment and testing. |
-| Solidity     | Smart-contract implementation language.                               |
-| Foundry      | Contract compilation, testing, deployment, and development tooling.   |
-| USDC         | Stablecoin used in the lending and settlement design.                 |
-| ERC-8004     | External agent identity, reputation, and validation standard.         |
-| ERC-8183     | Agentic commerce standard and economic-activity evidence path.        |
-| UUPS proxies | Upgradeable contract architecture used by the deployment.             |
-
-### Why Arc?
-
-Valen is designed around programmable financial operations that need clear settlement, transparent accounting, and integration with stablecoin-based applications.
-
-Arc provides the environment in which Valen's smart contracts can coordinate those operations.
-
-### Why USDC?
-
-A stablecoin-denominated credit system makes loan amounts and repayment obligations easier to express in familiar monetary units than a system whose principal is denominated entirely in a volatile native asset.
-
-The actual risk of a loan still depends on creditworthiness, collateral, liquidity, contract security, and repayment performance.
-
----
-
-## Smart Contract Design
-
-### AgentRegistry
-
-Provides a persistent Valen identity for each registered agent.
-
-Its responsibilities include:
-
-* Registering agents.
-* Maintaining agent ownership.
-* Associating authorized wallets with an agent identity.
-* Supporting authorized wallet changes.
-* Maintaining the external ERC-8004 identity reference.
-
-The Valen identity is separate from the external ERC-8004 token ID.
-
-### CreditRegistry
-
-Maintains the credit information used by the protocol.
-
-Its design includes:
-
-* Agent-scoped credit records.
-* Credit-limit accounting.
-* Repayment-history tracking.
-* Verified activity contributions.
-* Protocol-defined activity growth limits.
-* Credit adjustments associated with qualifying default outcomes.
-
-Credit availability is subject to the implemented rules and the agent's current financial state.
-
-### LoanRegistry
-
-Coordinates loan requests and records loan state.
-
-It validates loan proposals against relevant credit and protocol requirements, maintains loan records, and connects the lending lifecycle to the other required components.
-
-### LoanVault
-
-Handles loan-related funding and disbursement operations.
-
-It coordinates supported loan-funding pathways and milestone releases while interacting with the loan registry and relevant capital-management components.
-
-### LiquidityPool
-
-Supports pool-funded lending.
-
-The pool's available liquidity, configuration, and accounting determine whether a proposed pool-funded loan can proceed.
-
-### CollateralVault
-
-Handles collateral associated with supported lending arrangements.
-
-Collateral requirements and enforcement depend on the relevant loan terms and deployed contract rules.
-
-### UnderwriterPool
-
-Provides the underwriting-related functionality represented in Valen's contract architecture.
-
-### RecipientRegistry
-
-Maintains approval information for recipient addresses used in relevant loan operations.
-
-This adds a protocol-level control to the destinations to which loan funds can be directed.
-
-### ReservePool
-
-Supports reserve-related accounting and contribution mechanisms within the lending architecture.
-
-### RevenueRouter
-
-Coordinates revenue routing and repayment.
-
-Its responsibilities include handling supported repayment operations, routing funds according to applicable loan obligations, and coordinating credit-history updates when repayment conditions are satisfied.
-
-### ActivityAttester
-
-Connects verified external economic activity to Valen's credit system.
-
-Its design includes:
-
-* Authorized activity attestation.
-* Approved-source validation.
-* Agent-wallet authorization checks.
-* Duplicate-attestation prevention.
-* Recording accepted activity against an agent identity.
-
-The trust model includes an authorized attester. The existence of a `PaymentReleased` event does not independently prove every aspect of an agent's economic performance.
+## On-Chain Evidence
+
+The following transactions on Arc Testnet prove a complete collateralized lending lifecycle for loan ID 0. All transactions are confirmed `status: ok`. Token amounts use 6-decimal USDC/EURC units: `10,000,000` = 10 USDC and `11,000,000` = 11 USDC.
+
+The test used **EURC** (`0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a`) as collateral, approved in `CollateralVault` at 1.08 USD/token. The required collateral for a 10 USDC principal at 66% LTV was **14,029,180 EURC raw units**, confirmed by on-chain reservation.
+
+### Three Strongest Citations
+
+| What it proves | Transaction | Explorer |
+|---|---|---|
+| Loan 0 requested — principal 10 USDC, repayment 11 USDC, EURC collateral | `0xd99771...0051` | [View on Arc Explorer](https://explorer.testnet.arc.io/tx/0xd99771501e1bbff40e1b5c7524f6654a941b416f83bef475e4e35f35499a0051) |
+| Loan 0 funded from LiquidityPool — 10 USDC disbursed to agent | `0x60a95c...29f6` | [View on Arc Explorer](https://explorer.testnet.arc.io/tx/0x60a95c86b002fd9cbde21d4fd1aaa9366940149d691c0dec52451710a66929f6) |
+| Loan 0 repaid — 11 USDC, `repaidHandled = true`, credit updated to 8.85 USDC | `0xfbd7b1...22b9` | [View on Arc Explorer](https://explorer.testnet.arc.io/tx/0xfbd7b18b4da0df62697a2ade5da8d0c132a0d5a345ef1188c2633321f81622b9) |
+
+These three transactions together prove: a loan was requested and validated by the protocol, funded from a shared liquidity pool, and fully repaid with the credit record updated — the complete collateralized lending lifecycle.
+
+### Full Lifecycle Sequence (13 transactions)
+
+| Step | Description | Tx Hash | Block | Status |
+|---|---|---|---|---|
+| Setup | Approve USDC → LiquidityPool (20M) | [`0x36ba4b...83e63`](https://explorer.testnet.arc.io/tx/0x36ba4b7a274a0de02a5fe1c3fa5487583934308fffa25ab0e2f54fbe2fb83e63) | 66,045,703 | ok |
+| Setup | `initializeLiquidity(20000000)` | [`0x2591c9...782e`](https://explorer.testnet.arc.io/tx/0x2591c9e4b3904e4229c2117380d63533f43b0f3373b90ae8806768b45bd5782e) | 66,045,766 | ok |
+| Setup | Configure ActivityAttester source | [`0xaee139...f101`](https://explorer.testnet.arc.io/tx/0xaee139611a34c4e2cdc9a14b43d3af8f6b5ba14b331d3eb80e1eae36f872f101) | 66,048,023 | ok |
+| Setup | Set EURC asset config in CollateralVault | [`0xc56d5a...eae3`](https://explorer.testnet.arc.io/tx/0xc56d5a1ef7932002938132fe3ef6fea9bcc68f7c251a78c9245a5f0dce02eae3) | 66,451,947 | ok |
+| Pre | Approve EURC → CollateralVault (14,029,180) | [`0x2a50d1...8090`](https://explorer.testnet.arc.io/tx/0x2a50d186d84b09c75ce3f86a21d89eefa54bf26a26d5502f6ccbe2e8b0dd8090) | 66,456,211 | ok |
+| Pre | `depositCollateral(EURC, 14029180)` | [`0x2eacc1...edcc`](https://explorer.testnet.arc.io/tx/0x2eacc1bc207068f688580638baab212d97f224ba21b148cac7a0ea3dbf48edcc) | 66,456,302 | ok |
+| Pre | Approve recipient (agent wallet) | [`0x87a011...11b8`](https://explorer.testnet.arc.io/tx/0x87a011fb41e3f03be3b45933534e6117855fe734db9370e917c8cf16908e11b8) | 66,457,224 | ok |
+| 1 | `registerAgent(erc8004TokenId=0)` → agentId 1 | [`0x060fab...817`](https://explorer.testnet.arc.io/tx/0x060fab965cb5c12247a86849c41b80368cccdf3c22725d9a963fc5cdf67da817) | 66,457,639 | ok |
+| 2 | `requestLoan(...)` → loan ID 0 | [`0xd99771...0051`](https://explorer.testnet.arc.io/tx/0xd99771501e1bbff40e1b5c7524f6654a941b416f83bef475e4e35f35499a0051) | 66,458,074 | ok |
+| 3 | `fundFromPool(0)` — 10 USDC disbursed | [`0x60a95c...29f6`](https://explorer.testnet.arc.io/tx/0x60a95c86b002fd9cbde21d4fd1aaa9366940149d691c0dec52451710a66929f6) | 66,458,203 | ok |
+| 4 | `releaseMilestone(0, 0)` | [`0x18df51...8b62`](https://explorer.testnet.arc.io/tx/0x18df51379d8d1be3d4b6bc6cd64d058f9ea89e0be683eee22b08ea5b47be8b62) | 66,458,336 | ok |
+| 5 | Approve USDC → RevenueRouter (11M) | [`0x42bdae...0d5a`](https://explorer.testnet.arc.io/tx/0x42bdae1b1645dea77e9563f8696699a19705cb45c9bf0582da41495362ba0d5a) | 66,459,281 | ok |
+| 6 | `repayLoan(0, 11000000)` — loan closed | [`0xfbd7b1...22b9`](https://explorer.testnet.arc.io/tx/0xfbd7b18b4da0df62697a2ade5da8d0c132a0d5a345ef1188c2633321f81622b9) | 66,459,361 | ok |
+
+**Resulting verified on-chain state (read at block 68,946,770):**
+
+- Loan 0 status: `Repaid` (enum value 5)
+- `RevenueRouter.totalRecovered(0)` = `11,000,000`
+- `RevenueRouter.repaidHandled(0)` = `true`
+- `CollateralVault.reservations(0).resolved` = `true` — EURC collateral returned to borrower
+- `CreditRegistry.credits(agentId=1)`: `currentLimit = 8,850,000`, `loansRepaid = 1`, `loansDefaulted = 0`
+- Credit calculation: 5,000,000 (initial) + 2,750,000 (25% repayment growth on 11M) + 1,100,000 (10% early-repayment bonus) = **8,850,000**
+
+> Full verification report: [docs/valen-v1-verification.md](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md)
 
 ---
 
 ## Deployment
 
-Valen V1 has been deployed to Arc Testnet.
+Valen V1 is deployed on Arc Testnet. All 11 proxy addresses were verified on-chain at block 68,946,770. The proxies use ERC-1967 UUPS upgradeable architecture. Upgrading an implementation behind an existing proxy preserves that proxy address — a fresh deployment to a new address is a separate operation and is not the same as an upgrade.
 
-The following addresses were recovered from the project's saved deployment records. They are provided as deployment references and should be checked against the current chain state before use.
+**Network:** Arc Testnet  
+**Chain ID:** `5042002`  
+**RPC:** `https://rpc.testnet.arc.io`  
+**Explorer:** [https://explorer.testnet.arc.io](https://explorer.testnet.arc.io)  
+**USDC (ERC-20):** `0x3600000000000000000000000000000000000000` (6 decimals)
 
-**Network:** Arc Testnet
-**Chain ID:** `5042002`
+| Contract | Proxy Address | Explorer |
+|---|---|---|
+| AgentRegistry | `0xeC74944752Fff0f53Af5b727F288f59435C0144e` | [View](https://explorer.testnet.arc.io/address/0xeC74944752Fff0f53Af5b727F288f59435C0144e) |
+| CreditRegistry | `0x258B0678b30E2d32034389cfeCa7f58fE1CeB897` | [View](https://explorer.testnet.arc.io/address/0x258B0678b30E2d32034389cfeCa7f58fE1CeB897) |
+| LoanRegistry | `0x253B68c7a2D646561387Dc0958A6C176a30a6f8d` | [View](https://explorer.testnet.arc.io/address/0x253B68c7a2D646561387Dc0958A6C176a30a6f8d) |
+| RevenueRouter | `0xE0B9b39E72f73f2d85D77a1e24a2f319246de822` | [View](https://explorer.testnet.arc.io/address/0xE0B9b39E72f73f2d85D77a1e24a2f319246de822) |
+| LoanVault | `0x6F77979c0e2f6f8073FD6555c9A9d5883786AE19` | [View](https://explorer.testnet.arc.io/address/0x6F77979c0e2f6f8073FD6555c9A9d5883786AE19) |
+| CollateralVault | `0xC49999B7d32F1B1Df28d53efAdee450A0Fd7dA2f` | [View](https://explorer.testnet.arc.io/address/0xC49999B7d32F1B1Df28d53efAdee450A0Fd7dA2f) |
+| UnderwriterPool | `0x23307d061dad8335995080518B73A839Ffe69E7A` | [View](https://explorer.testnet.arc.io/address/0x23307d061dad8335995080518B73A839Ffe69E7A) |
+| RecipientRegistry | `0xf8E069B659CEAf9c68318041D727b5c482Ac6374` | [View](https://explorer.testnet.arc.io/address/0xf8E069B659CEAf9c68318041D727b5c482Ac6374) |
+| ReservePool | `0xe741d95aa64F125f75cB14E90d4b1cF96618f0fD` | [View](https://explorer.testnet.arc.io/address/0xe741d95aa64F125f75cB14E90d4b1cF96618f0fD) |
+| LiquidityPool | `0x04B22AD06256cFdD32546aCC6c40bFF9C3eFd061` | [View](https://explorer.testnet.arc.io/address/0x04B22AD06256cFdD32546aCC6c40bFF9C3eFd061) |
+| ActivityAttester | `0x2660044E4A7316B65263ea1B23b80aAf09841196` | [View](https://explorer.testnet.arc.io/address/0x2660044E4A7316B65263ea1B23b80aAf09841196) |
 
-| Contract          | Proxy address                                |
-| ----------------- | -------------------------------------------- |
-| AgentRegistry     | `0xeC74944752Fff0f53Af5b727F288f59435C0144e` |
-| CreditRegistry    | `0x258B0678b30E2d32034389cfeCa7f58fE1CeB897` |
-| LoanRegistry      | `0x253B68c7a2D646561387Dc0958A6C176a30a6f8d` |
-| RevenueRouter     | `0xE0B9b39E72f73f2d85D77a1e24a2f319246de822` |
-| LoanVault         | `0x6F77979c0e2f6f8073FD6555c9A9d5883786AE19` |
-| CollateralVault   | `0xC49999B7d32F1B1Df28d53efAdee450A0Fd7dA2f` |
-| UnderwriterPool   | `0x23307d061dad8335995080518B73A839Ffe69E7A` |
-| RecipientRegistry | `0xf8E069B659CEAf9c68318041D727b5c482Ac6374` |
-| ReservePool       | `0xe741d95aa64F125f75cB14E90d4b1cF96618f0fD` |
-| LiquidityPool     | `0x04B22AD06256cFdD32546aCC6c40bFF9C3eFd061` |
-| ActivityAttester  | `0x2660044E4A7316B65263ea1B23b80aAf09841196` |
-
-**Important:** These are the addresses recovered from the October 7 deployment record. Verify the current proxy addresses, implementation versions, and configuration before integrating with them. Do not assume that historical addresses reflect subsequent upgrades or deployment changes.
+These addresses were verified by `eth_getCode` (212 bytes each — OpenZeppelin ERC1967Proxy), ERC-1967 implementation slot reads, and cross-checked against `Deploy.s.sol`. See the [full verification report](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md) for implementation addresses, wiring checks, and all 13 lifecycle transaction hashes.
 
 ---
 
-## Getting Started
+## Architecture
+
+Valen separates identity, credit evaluation, loan state, capital management, revenue routing, and activity verification into 11 distinct contract responsibilities.
+
+### Contract Responsibilities
+
+| Contract | Responsibility |
+|---|---|
+| `AgentRegistry` | Persistent Valen agent identity. Maintains agent owners, authorized wallets, and ERC-8004 external reference. Credit history is keyed to `agentId`, not to any wallet. |
+| `CreditRegistry` | Per-agent credit records: `currentLimit` (from repayment history), `activityLimit` (from ERC-8183 attestations), outstanding exposure, default history. Authorized callers only. |
+| `LoanRegistry` | Loan storage and state machine (`Requested → Active → Repaid / Defaulted`). Validates proposals against credit limits, recipient approvals, milestone structure, and collateral rules. |
+| `LoanVault` | Loan funding and milestone disbursement. Supports both direct P2P funding (`fundLoan`) and pool-funded path (`fundFromPool`). Enforces `directDisbursement` flag for collateralized loans. |
+| `LiquidityPool` | Share-accounted USDC pool for pooled lending. `idleLedger + totalDeployed = totalAssets`. `reconcileLoan` is permissionless and must be called to finalize accounting after repayment. |
+| `CollateralVault` | Multi-asset collateral (V1: USDC and EURC at admin-set USD prices). LTV-checked at deposit. Released on repayment; seized to lender on default. |
+| `UnderwriterPool` | Protocol slot for underwriter-staked risk coverage. Underwriter reserves are locked per-loan and settled on repayment or default. |
+| `RecipientRegistry` | Allowlist of approved recipient addresses. All `permittedRecipients` and the loan's `creditWallet` must be registry-approved before a loan request is accepted. |
+| `ReservePool` | Accumulates 2% reserve contributions from each repayment (via `RevenueRouter`). Covers lender shortfalls on uncollateralized defaults. |
+| `RevenueRouter` | Receives and routes all repayments. Splits between lender share and agent credit wallet per `repaymentRateBps`. Calls `CreditRegistry.recordRepayment` on full repayment. |
+| `ActivityAttester` | Accepts authorized attestations of ERC-8183 `PaymentReleased` events. Validates source whitelist, agent-wallet authorization, and per-`(source, jobId)` replay protection. Forwards verified amounts to `CreditRegistry.recordActivity`. |
+
+### Relationship Diagram
+
+```text
+                    INDEPENDENT AI AGENT
+                            │
+                            ▼
+              ┌─────────────────────────┐
+              │      AgentRegistry      │◄── ERC-8004 external ref
+              └────────────┬────────────┘
+                           │ agentId
+                           ▼
+              ┌─────────────────────────┐       ┌──────────────────────┐
+              │      CreditRegistry     │◄──────│  ActivityAttester    │
+              └────────────┬────────────┘       │  (ERC-8183 path)     │
+                           │                    └──────────────────────┘
+                           ▼
+              ┌─────────────────────────┐
+              │      LoanRegistry       │◄── CollateralVault
+              └────────────┬────────────┘◄── UnderwriterPool
+                           │                ◄── RecipientRegistry
+                           ▼                ◄── ReservePool
+              ┌─────────────────────────┐
+              │        LoanVault        │
+              └────┬──────────────┬─────┘
+                   │              │
+                   ▼              ▼
+          LiquidityPool    CollateralVault
+          (pool funding)   (collateral hold)
+
+              REPAYMENT FLOW
+              Agent ──► RevenueRouter ──► Lender / LiquidityPool
+                                     └──► ReservePool (2%)
+                                     └──► CreditRegistry (recordRepayment)
+```
+
+### Architectural Principles
+
+**Persistent identity:** Credit history is associated with a Valen `agentId`, not a wallet. Authorized wallets can be added or removed without resetting credit history.
+
+**Explicit trust boundaries:** `fundFromPool` is restricted to the contract owner or a registered keeper. `ActivityAttester` requires owner-approved source contracts and agent-wallet authorization. `RecipientRegistry` controls all loan fund destinations.
+
+**Separation of responsibilities:** 11 contracts, each with a bounded purpose. No single contract handles identity, credit, lending, liquidity, and repayment simultaneously.
+
+**Auditable execution:** All state transitions emit events. Loan state, collateral reservations, credit records, and pool accounting are fully readable via public view functions.
+
+---
+
+## Technology Stack
+
+| Technology | Role |
+|---|---|
+| Solidity `^0.8.24` | Smart contract implementation language |
+| Foundry | Compilation, testing (`forge test`), deployment scripting (`forge script`) |
+| OpenZeppelin Contracts Upgradeable | `Initializable`, `OwnableUpgradeable`, `UUPSUpgradeable`, `SafeERC20` |
+| OpenZeppelin Foundry Upgrades | UUPS proxy deployment via `Upgrades.deployUUPSProxy` |
+| Arc (testnet chain ID 5042002) | Settlement environment; USDC is the native gas token |
+| USDC | 6-decimal ERC-20 stablecoin; loan principal, repayment, and collateral denomination |
+| ERC-8004 | External AI agent identity standard (informational reference stored per agent) |
+| ERC-8183 | Agentic Commerce Protocol; `PaymentReleased` events used as economic-activity evidence |
+
+### Why Arc?
+
+On Arc, USDC is the native gas token. This means loan amounts, repayments, collateral, and gas are all denominated in the same asset — no native-token volatility in the protocol's accounting, and no separate gas-token wallet management for agents.
+
+### Why USDC?
+
+A stablecoin-denominated credit system makes loan amounts and repayment obligations deterministic in familiar monetary units. The actual risk of a loan depends on creditworthiness, collateral quality, liquidity, and repayment performance — not on native-token price.
+
+---
+
+## Why Valen Is Different
+
+### 1. Credit belongs to an agent identity, not a wallet
+
+Valen's `AgentRegistry` assigns each agent a persistent `agentId`. Credit records in `CreditRegistry` are keyed to `agentId`. An agent can rotate authorized wallets without resetting its financial history.
+
+Valen also stores an ERC-8004 external token ID as an informational reference. The Valen `agentId` is distinct from the ERC-8004 token ID and is the sole key for Valen's credit accounting.
+
+### 2. Economic activity can contribute to credit capacity
+
+`ActivityAttester` accepts attestations of ERC-8183 `PaymentReleased` events from owner-approved source contracts. Each `(source, jobId)` pair can be attested exactly once. Verified amounts are forwarded to `CreditRegistry.recordActivity`, which increases the agent's `activityLimit` subject to protocol caps (V1: 5% growth per event, 50 USDC max increase per event, 50,000 USDC lifetime ceiling).
+
+The attestation model requires authorized attesters and approved source contracts. An on-chain payment event is not independently sufficient proof of creditworthiness — it is one input into the credit model.
+
+### 3. Credit capacity evolves with demonstrated behavior
+
+V1 credit parameters (from `Deploy.s.sol`):
+
+- **Initial credit limit:** 5 USDC
+- **Repayment growth:** 25% of repaid amount per loan
+- **Early-repayment bonus:** +10% of repaid amount
+- **Max step increase:** 2,000 USDC per repayment event
+- **Default penalty:** 20% reduction to `currentLimit`
+- **Collateral approval threshold:** 10,000 USDC (loans above this require manual approval)
+- **Max LTV:** 66% (CollateralVault)
+- **Reserve fee:** 2% of each repayment (to ReservePool)
+
+### 4. Lending is programmable and enforceable on-chain
+
+A loan proposal specifies principal, repayment amount, duration, collateral, milestone amounts, permitted recipients, and `creditWallet`. `LoanRegistry._validateProposal` enforces all constraints on-chain before any loan is stored. Funding, milestone release, and repayment are separate on-chain operations.
+
+### 5. Pool-funded lending with share accounting
+
+`LiquidityPool` enables shared liquidity across multiple loans. Share price reflects `idleLedger + totalDeployed`. The 2% reserve fee is taken from the lender's share on each repayment. `reconcileLoan` is permissionless and must be called after repayment to finalize pool accounting.
+
+---
+
+## Developer Setup
 
 ### Prerequisites
 
-Install the following tools:
+- [Foundry](https://getfoundry.sh/) — `forge`, `cast`, `anvil`
+- Git
 
-* Git
-* Foundry
-* Node.js and npm, if required by the scripts or auxiliary tooling
-* An Arc Testnet RPC endpoint
-* A funded Arc Testnet account for deployment and testing
-
-### 1. Clone the repository
+### Clone
 
 ```bash
 git clone https://github.com/Web3smallie/valencredit.git
 cd valencredit
 ```
 
-### 2. Install Foundry dependencies
+### Install dependencies
 
 ```bash
 forge install
 ```
 
-If the repository already contains its dependencies, use the project's documented dependency setup rather than reinstalling them unnecessarily.
-
-### 3. Configure the network
-
-Inspect the repository's `foundry.toml` and deployment scripts to confirm that the `arc_testnet` RPC alias is configured.
-
-A typical Foundry configuration uses an RPC endpoint such as:
-
-```text
-https://rpc.testnet.arc.network
-```
-
-Use your own environment configuration when appropriate. Never commit private keys, keystore passwords, or other secrets to GitHub.
-
-### 4. Compile the contracts
+### Compile
 
 ```bash
 forge build
 ```
 
-### 5. Run the test suite
+### Run tests
 
 ```bash
 forge test
 ```
 
-For more detailed output:
+For verbose output:
 
 ```bash
 forge test -vvv
 ```
 
-Review the actual test results and any environment-specific failures before reporting a test count or claiming that every test passes.
+The test suite covers 197 tests across unit, integration, and risk-regression files (see `test/`). Tests use `ERC1967Proxy` direct deployment; no FFI or external network calls are required.
 
-### 6. Inspect deployed contract state
+### Read-only verification (no private key needed)
 
-Use Foundry's `cast` tool to query a verified deployment.
-
-For example:
+Query chain ID:
 
 ```bash
-cast chain-id --rpc-url https://rpc.testnet.arc.network
+cast chain-id --rpc-url https://rpc.testnet.arc.io
 ```
 
-To check a known contract's code:
+Verify proxy bytecode:
 
 ```bash
-cast code <CONTRACT_ADDRESS> \
-  --rpc-url https://rpc.testnet.arc.network
+cast code 0xeC74944752Fff0f53Af5b727F288f59435C0144e \
+  --rpc-url https://rpc.testnet.arc.io
 ```
 
-To inspect a contract's state, use the relevant view function and ABI signature from the deployed implementation.
+Read ERC-1967 implementation slot:
 
-### 7. Deploy only when necessary
-
-The deployment script is located at:
-
-```text
-script/Deploy.s.sol
+```bash
+cast storage 0xeC74944752Fff0f53Af5b727F288f59435C0144e \
+  0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc \
+  --rpc-url https://rpc.testnet.arc.io
 ```
 
-Review the script and network configuration before broadcasting a deployment. Existing testnet deployments should be verified and reused where appropriate; a new deployment is not necessary simply to recover a historical transaction hash.
+Query loan state:
+
+```bash
+cast call 0x253B68c7a2D646561387Dc0958A6C176a30a6f8d \
+  "nextLoanId()(uint256)" \
+  --rpc-url https://rpc.testnet.arc.io
+```
+
+### Network configuration
+
+`foundry.toml` already configures the `arc_testnet` RPC alias:
+
+```toml
+[rpc_endpoints]
+arc_testnet = "https://rpc.testnet.arc.io"
+```
+
+### Deploy (state-changing — requires funded account)
+
+> **Warning:** Deployment sends transactions and consumes gas. Review `script/Deploy.s.sol` and your network configuration before broadcasting.
+
+```bash
+forge script script/Deploy.s.sol \
+  --rpc-url arc_testnet \
+  --account <your-keystore-account> \
+  --broadcast
+```
+
+Never commit private keys, keystore passwords, or `.env` files containing secrets.
 
 ---
 
-## Testing and Verification
+## Known Limitations and Outstanding Items
 
-Valen's functionality should be evaluated at multiple levels.
+**There is no frontend.** Valen V1 is a smart-contract protocol. All interaction is via contract calls (Foundry `cast`, scripts, or SDK integration). A frontend is not yet implemented.
 
-### Contract-level tests
+**No automated transaction submission.** The repository includes a backend (`backend/`) — a Fastify HTTP server with read-only API routes and on-chain event listeners for `LoanRequested`, `LoanFunded`, `LoanDefaulted`, and other events. The event listeners log to console only; the backend explicitly does not hold private keys or expose routes for `fundFromPool`, `markDefault`, `releaseMilestone`, `reconcileLoan`, or any other state-changing operation. Those calls require the contract owner or a registered keeper to submit transactions manually.
 
-Test individual components and their interactions, including:
+**The following findings are documented in the [verification report](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md) and require source-code review before any state-changing action is taken:**
 
-* Agent registration and wallet authorization.
-* Credit-limit validation.
-* Loan proposal validation.
-* Recipient approval.
-* Pool liquidity and funding.
-* Collateral operations.
-* Milestone disbursement.
-* Revenue routing.
-* Repayment accounting.
-* Activity attestation and duplicate prevention.
-* Default and recovery behavior.
-* Authorization boundaries and invalid transitions.
+### LiquidityPool — `reconcileLoan(0)` not yet called
 
-### Integration tests
+Loan 0 is fully repaid (`repaidHandled = true`, `totalRecovered = 11,000,000`) but `LiquidityPool.finalized(0) = false` and `activeLoanCount() = 1`. This is because `reconcileLoan` is a permissionless function that is not called automatically by `repayLoan`. The 11 USDC repayment arrived at the pool's address (since `loan.lender = LiquidityPool`) but is not yet reflected in `idleLedger`.
 
-Verify that the contracts are wired together correctly and that permissions, dependencies, and configuration support the intended flows.
+Before calling `reconcileLoan(0)`, review the function in `LiquidityPool.sol` to confirm expected behavior. The call is permissionless and non-destructive, but the source must be independently verified before execution.
 
-A contract can compile successfully while still being misconfigured for production-like use. Deployment and integration verification therefore matter independently of compilation.
+### RevenueRouter — `initializeV2()` and reserve accounting
 
-### End-to-end verification
+`RevenueRouter.migrationCutoff()` could not be read (reverted), suggesting `initializeV2()` — the reinitializer introduced in `UpgradeRevenueRouter.s.sol` — may not have been called. Until it is called, `setReserveSkimmed` cannot be used to correct historical reserve accounting.
 
-A meaningful end-to-end test should demonstrate the relevant sequence of state changes and their transaction receipts.
+For loan 0: `poolRecovered(0)` currently returns `11,000,000`, which overcounts by `220,000` (the 2% reserve fee on the 11M repayment that was sent to `ReservePool` but not yet tracked in `reserveSkimmed[0]`).
 
-For example:
-
-1. Register an agent.
-2. Configure the required recipient and liquidity settings.
-3. Request a loan within the agent's available credit.
-4. Fund the loan through a supported pathway.
-5. Execute the relevant milestone release.
-6. Repay the loan through the configured repayment flow.
-7. Verify the resulting balances, loan status, and credit-history changes.
-
-Where the activity-credit path is included, separately verify that accepted economic-activity evidence updates the intended agent's credit record and that duplicate evidence cannot be counted twice.
-
-**Evidence matters:** Successful compilation, passing unit tests, deployment transactions, and successful end-to-end execution are different forms of verification. Report each accurately.
+These are accounting-correction items. The lending lifecycle is valid and complete. Before executing `initializeV2()`, `setReserveSkimmed(0, 220000)`, or `lockMigration()`, review the relevant source in `RevenueRouter.sol` and `script/UpgradeRevenueRouter.s.sol` independently.
 
 ---
 
@@ -661,148 +459,46 @@ Where the activity-credit path is included, separately verify that accepted econ
 
 Valen handles financial operations through smart contracts. Its security assumptions and limitations must be understood before funds are put at risk.
 
-### Authorization
+The repository includes `docs/security-audit.md` documenting 19 findings from a September 2026 audit, and `docs/v1-readiness-audit.md` documenting their resolution status. The V1 source reflects fixes for all critical and high findings (RISK-01 through RISK-11). Three findings are partially or not addressed (RISK-12, RISK-15, RISK-17 deploy gap). Review both documents before relying on the protocol.
 
-Administrative operations and sensitive financial transitions must enforce the intended caller permissions.
+Key trust assumptions:
 
-### Credit-limit enforcement
+- **Owner key:** All 11 contracts use `OwnableUpgradeable`. The deployer wallet (`0xB0E8Ba6aFe21371AD4001e611224FC200FD10144`) controls upgrades, keeper registration, parameter changes, and `fundFromPool` authorization.
+- **Attesters:** `ActivityAttester` relies on owner-approved source contracts and an authorized submitter. Incorrect source configuration undermines the activity-credit path.
+- **Upgradeability:** All proxies are UUPS upgradeable. Implementation changes should be reviewed and tested before broadcasting.
 
-Loan requests must respect the applicable credit limits and outstanding exposure constraints.
-
-### Repayment integrity
-
-Repayment calculations and loan-state transitions must prevent underpayment from being treated as full repayment and prevent a closed or settled loan from being paid twice.
-
-### Default handling
-
-Default, expiry, settlement, and recovery transitions must have explicit and mutually consistent rules. Funds must not become permanently inaccessible because one transition makes another required recovery operation impossible.
-
-### Liquidity accounting
-
-Pool-funded lending requires correct accounting for assets, outstanding loans, repayments, and recoveries.
-
-### Activity verification
-
-The attestation model depends on authorized attesters and approved activity sources. Administrative compromise or incorrect source configuration can undermine the reliability of accepted evidence.
-
-Duplicate prevention helps stop the same activity record from being credited repeatedly, but does not independently prove that an underlying economic activity is profitable or free of fraud.
-
-### Upgradeability
-
-Upgradeable contracts introduce administrative trust and operational risk. Implementation changes should be reviewed, tested, and verified against the deployed proxy addresses.
-
-### Testnet status
-
-The listed deployment is for Arc Testnet. It should not be interpreted as evidence that Valen is ready for unrestricted mainnet lending.
-
-**Valen should not be used to manage production funds until the deployed versions, access controls, loan-state transitions, liquidity accounting, and recovery paths have been independently reviewed and verified.**
+**Valen V1 is deployed on testnet. It should not be used to manage production funds until the deployed versions, access controls, loan-state transitions, liquidity accounting, and recovery paths have been independently reviewed.**
 
 ---
 
 ## Current Scope
 
-Valen's core scope is programmable lending for independent AI agents.
+Valen's core scope is programmable lending for independent AI agents. It is not:
 
-It is not intended to be:
+- An AI agent marketplace
+- A service that creates or owns agents
+- A centralized directory of agent products
+- A guarantee that an agent will repay its debts
 
-* An AI agent marketplace.
-* A service that creates or owns agents.
-* A centralized directory of agent products.
-* A general-purpose AI framework.
-* A replacement for every identity or reputation standard.
-* A guarantee that an agent will repay its debts.
-
-Its purpose is to provide financial infrastructure that external agents can use as they participate in an increasingly autonomous economy.
+Its purpose is to provide financial infrastructure that independently developed agents can use as they participate in an increasingly autonomous economy.
 
 ---
 
 ## Roadmap
 
-The following are potential development directions, not claims that every capability is already implemented.
+The following are potential development directions, not claims that every capability is implemented.
 
-### Phase 1 — Core programmable credit
+**Phase 1 — Core programmable credit (V1, deployed)**  
+Persistent agent identity, agent-scoped credit records, pool-funded lending, collateral and milestone operations, revenue routing and repayment, credit-history updates.
 
-* Persistent agent identity.
-* Agent-scoped credit records.
-* Loan proposal validation.
-* Pool-funded lending.
-* Collateral and milestone operations.
-* Revenue routing and repayment.
-* Credit-history updates.
+**Phase 2 — Stronger economic-activity verification**  
+Production-grade indexing of ERC-8183 payment events, more robust attester operations, improved replay-prevention tooling.
 
-### Phase 2 — Stronger economic-activity verification
+**Phase 3 — Risk and capital efficiency**  
+More sophisticated underwriting policies, improved liquidity and reserve accounting, expanded recovery and default-management mechanisms.
 
-* Production-grade indexing of ERC-8183 payment events.
-* More robust verification of event provenance.
-* Improved attester operations and monitoring.
-* Expanded replay-prevention and audit tooling.
-* More comprehensive end-to-end verification of activity-derived credit.
-
-### Phase 3 — Risk and capital efficiency
-
-* More sophisticated underwriting policies.
-* Improved liquidity and reserve accounting.
-* Better borrower and portfolio risk visibility.
-* Expanded recovery and default-management mechanisms.
-* Additional controls for lenders and capital providers.
-
-### Phase 4 — Agent-native financial integrations
-
-* Integration with more agentic commerce applications.
-* Standardized interfaces for agent credit access.
-* Programmable credit policies for different economic activities.
-* Integrations with additional settlement and payment systems.
-* Stronger verification mechanisms for cross-protocol activity.
-
-The roadmap will depend on testing, security review, integration requirements, and demonstrated demand.
-
----
-
-## Who Is Valen For?
-
-**AI agent developers**
-
-Give independently operated agents access to programmable financial infrastructure without requiring each application to invent its own credit ledger.
-
-**Agentic commerce protocols**
-
-Explore integrations in which verified payment activity can contribute to a persistent financial profile.
-
-**Liquidity providers and underwriters**
-
-Participate in a lending architecture with explicit loan records, funding mechanics, and accounting responsibilities, subject to the applicable risk and liquidity arrangements.
-
-**Protocol developers**
-
-Build on a modular credit architecture that separates identity, credit policy, lending, settlement, and activity verification.
-
-**Researchers and ecosystem contributors**
-
-Explore how on-chain economic behavior can inform credit allocation for autonomous software.
-
----
-
-## The Bigger Vision
-
-The next generation of AI agents will not simply retrieve information or generate content. They will transact, purchase services, execute work, and participate in economic systems.
-
-Some will generate revenue before they have established a conventional financial history.
-
-Others will operate through changing wallets, interact with multiple protocols, and need access to capital to execute larger tasks.
-
-The financial system serving these agents will need to answer a new question:
-
-**How should an autonomous economic actor earn access to credit?**
-
-Valen's answer is to build the programmable infrastructure around persistent identity, verifiable economic activity, enforceable obligations, and a financial history that can evolve over time.
-
-The objective is not to promise credit to every agent.
-
-It is to create the foundations for a system in which access to credit can be governed by transparent rules and informed by demonstrated economic behavior.
-
-**Agents need more than the ability to transact. They need a way to establish financial credibility.**
-
-**Valen is building the credit layer for that future.**
+**Phase 4 — Agent-native financial integrations**  
+Integration with more agentic commerce applications, standardized credit-access interfaces, integrations with additional settlement and payment systems.
 
 ---
 
@@ -815,27 +511,30 @@ Before proposing a substantial change:
 1. Review the relevant contract and its access-control assumptions.
 2. Understand the impact on loan-state transitions and storage layout.
 3. Add tests for normal operation and failure cases.
-4. Run the relevant Foundry tests.
+4. Run the Foundry test suite.
 5. Document any changes to configuration, deployment, or trust assumptions.
 
 For changes involving upgradeable contracts, storage compatibility and upgrade ordering must be considered explicitly.
+
+---
 
 ## License
 
 See the repository's `LICENSE` file for the applicable license terms.
 
-## Links
-
-* **GitHub:** https://github.com/Web3smallie/valencredit
-* **Arc Testnet Explorer:** https://explorer.testnet.arc.io/
-* **Arc Testnet RPC:** https://rpc.testnet.arc.io
-* **USDC:** https://www.circle.com/usdc
-* **ERC-8004:** https://eips.ethereum.org/EIPS/eip-8004
-* **Foundry:** https://getfoundry.sh/
-
-
 ---
 
-### Valen
+## Links
+
+- **GitHub:** [https://github.com/Web3smallie/valencredit](https://github.com/Web3smallie/valencredit)
+- **Verification Report:** [docs/valen-v1-verification.md](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md)
+- **Arc Testnet Explorer:** [https://explorer.testnet.arc.io](https://explorer.testnet.arc.io)
+- **Arc Testnet RPC:** `https://rpc.testnet.arc.io`
+- **USDC:** [https://www.circle.com/usdc](https://www.circle.com/usdc)
+- **ERC-8004:** [https://eips.ethereum.org/EIPS/eip-8004](https://eips.ethereum.org/EIPS/eip-8004)
+- **ERC-8183:** [https://eips.ethereum.org/EIPS/eip-8183](https://eips.ethereum.org/EIPS/eip-8183)
+- **Foundry:** [https://getfoundry.sh/](https://getfoundry.sh/)
+
+---
 
 **Credit for AI agents. Earned through economic activity. Governed by programmable rules.**
