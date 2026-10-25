@@ -116,16 +116,16 @@ sequenceDiagram
     Note over LoanVault,LiquidityPool: Pooled funding path (owner or keeper calls fundFromPool)
     LoanVault->>LiquidityPool: fundLoan(loanId, principal)
     LiquidityPool-->>LoanVault: transfers principal USDC
-    LoanVault->>LoanRegistry: markFunded(loanId, liquidityPool) → status = Active
+    LoanVault->>LoanRegistry: markFunded(loanId, liquidityPool), status = Active
     LoanVault->>Agent: DirectDisbursementSent (full principal to creditWallet)
 
     Note over LoanVault,LoanRegistry: releaseMilestone applies to non-direct-disbursement loans only
 
     Agent->>RevenueRouter: repayLoan(loanId, 11_000_000)
     RevenueRouter->>LiquidityPool: transfers lenderShare USDC
-    RevenueRouter->>LoanRegistry: markRepaid → status = Repaid
+    RevenueRouter->>LoanRegistry: markRepaid, status = Repaid
     RevenueRouter->>CreditRegistry: recordRepayment(agentId, amount, early=true)
-    LoanRegistry->>CollateralVault: release(loanId) → collateral returned
+    LoanRegistry->>CollateralVault: release(loanId), collateral returned
 
     Note over LiquidityPool: Permissionless; not automatic
     Agent->>LiquidityPool: reconcileLoan(loanId)
@@ -374,7 +374,7 @@ For verbose output:
 forge test -vvv
 ```
 
-The test suite covers 197 tests across unit, integration, and risk-regression files (see `test/`). Tests use `ERC1967Proxy` direct deployment; no FFI or external network calls are required.
+The test suite covers 558 tests across unit, integration, and risk-regression files (see `test/`). Tests use `ERC1967Proxy` direct deployment; no FFI or external network calls are required.
 
 ### Read-only verification (no private key needed)
 
@@ -431,43 +431,21 @@ Never commit private keys, keystore passwords, or `.env` files containing secret
 
 ---
 
-## Known Limitations and Outstanding Items
+## Project Status
 
-**There is no frontend.** Valen V1 is a smart-contract protocol. All interaction is via contract calls (Foundry `cast`, scripts, or SDK integration). A frontend is not yet implemented.
+Valen was developed as a submission for the Arc hackathon in response to the requirement to provide working code and demonstrate the underlying protocol logic. The project delivers its smart contract architecture, programmable lending mechanisms, ERC-8004 identity integration, ERC-8183 economic activity verification pathway, and verifiable on-chain transaction evidence on Arc Testnet.
 
-**No automated transaction submission.** The repository includes a backend (`backend/`) — a Fastify HTTP server with read-only API routes and on-chain event listeners for `LoanRequested`, `LoanFunded`, `LoanDefaulted`, and other events. The event listeners log to console only; the backend explicitly does not hold private keys or expose routes for `fundFromPool`, `markDefault`, `releaseMilestone`, `reconcileLoan`, or any other state-changing operation. Those calls require the contract owner or a registered keeper to submit transactions manually.
+The current implementation demonstrates the protocol's core concepts and intended lending lifecycle. Further development, testing, security reviews, and operational hardening may be undertaken as the project evolves toward potential future production deployment.
 
-**The following findings are documented in the [verification report](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md) and require source-code review before any state-changing action is taken:**
-
-### LiquidityPool — `reconcileLoan(0)` not yet called
-
-Loan 0 is fully repaid (`repaidHandled = true`, `totalRecovered = 11,000,000`) but `LiquidityPool.finalized(0) = false` and `activeLoanCount() = 1`. This is because `reconcileLoan` is a permissionless function that is not called automatically by `repayLoan`. The 11 USDC repayment arrived at the pool's address (since `loan.lender = LiquidityPool`) but is not yet reflected in `idleLedger`.
-
-Before calling `reconcileLoan(0)`, review the function in `LiquidityPool.sol` to confirm expected behavior. The call is permissionless and non-destructive, but the source must be independently verified before execution.
-
-### RevenueRouter — `initializeV2()` and reserve accounting
-
-`RevenueRouter.migrationCutoff()` could not be read (reverted), suggesting `initializeV2()` — the reinitializer introduced in `UpgradeRevenueRouter.s.sol` — may not have been called. Until it is called, `setReserveSkimmed` cannot be used to correct historical reserve accounting.
-
-For loan 0: `poolRecovered(0)` currently returns `11,000,000`, which overcounts by `220,000` (the 2% reserve fee on the 11M repayment that was sent to `ReservePool` but not yet tracked in `reserveSkimmed[0]`).
-
-These are accounting-correction items. The lending lifecycle is valid and complete. Before executing `initializeV2()`, `setReserveSkimmed(0, 220000)`, or `lockMigration()`, review the relevant source in `RevenueRouter.sol` and `script/UpgradeRevenueRouter.s.sol` independently.
+Valen is currently an experimental testnet implementation. Production deployment is a possible future milestone, subject to further development and validation.
 
 ---
 
-## Security and Risk Considerations
+## Operational Notes
 
-Valen handles financial operations through smart contracts. Its security assumptions and limitations must be understood before funds are put at risk.
+**There is no frontend.** Valen V1 is a smart-contract protocol. All interaction is via contract calls (Foundry `cast`, scripts, or SDK integration). A frontend is not yet implemented.
 
-The repository includes `docs/security-audit.md` documenting 19 findings from a September 2026 audit, and `docs/v1-readiness-audit.md` documenting their resolution status. The V1 source reflects fixes for all critical and high findings (RISK-01 through RISK-11). Three findings are partially or not addressed (RISK-12, RISK-15, RISK-17 deploy gap). Review both documents before relying on the protocol.
-
-Key trust assumptions:
-
-- **Owner key:** All 11 contracts use `OwnableUpgradeable`. The deployer wallet (`0xB0E8Ba6aFe21371AD4001e611224FC200FD10144`) controls upgrades, keeper registration, parameter changes, and `fundFromPool` authorization.
-- **Attesters:** `ActivityAttester` relies on owner-approved source contracts and an authorized submitter. Incorrect source configuration undermines the activity-credit path.
-- **Upgradeability:** All proxies are UUPS upgradeable. Implementation changes should be reviewed and tested before broadcasting.
-
-**Valen V1 is deployed on testnet. It should not be used to manage production funds until the deployed versions, access controls, loan-state transitions, liquidity accounting, and recovery paths have been independently reviewed.**
+**No automated transaction submission.** The repository includes a backend (`backend/`) — a Fastify HTTP server with read-only API routes and on-chain event listeners for `LoanRequested`, `LoanFunded`, `LoanDefaulted`, and other events. The event listeners log to console only; the backend does not hold private keys or expose routes for state-changing operations. `fundFromPool`, `markDefault`, `releaseMilestone`, `reconcileLoan`, and similar calls require the contract owner or a registered keeper to submit transactions manually.
 
 ---
 
