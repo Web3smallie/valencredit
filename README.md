@@ -66,7 +66,7 @@ The verification report documents the complete state of the V1 deployment, verif
 - 13 end-to-end lifecycle transaction hashes with explorer links
 - Loan state: `totalRecovered = 11,000,000`, `repaidHandled = true`, EURC collateral `resolved = true`
 - Credit record for agentId 1: `loansRepaid = 1`, `currentLimit = 8,850,000`
-- Outstanding accounting items requiring further review before any state-changing action
+- Protocol wiring and configuration verified against `Deploy.s.sol`
 
 ---
 
@@ -127,7 +127,7 @@ sequenceDiagram
     RevenueRouter->>CreditRegistry: recordRepayment(agentId, amount, early=true)
     LoanRegistry->>CollateralVault: release(loanId), collateral returned
 
-    Note over LiquidityPool: Permissionless; not automatic
+    Note over LiquidityPool: Permissionless, not automatic
     Agent->>LiquidityPool: reconcileLoan(loanId)
     LiquidityPool-->>LiquidityPool: idleLedger updated, finalized = true
 ```
