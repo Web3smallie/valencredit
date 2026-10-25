@@ -85,7 +85,7 @@ Valen's lending lifecycle combines on-chain contract state with off-chain coordi
 | 7 | Pool funding via `LoanVault.fundFromPool` | Yes | Contract owner or registered keeper must call (`registry.keepers(msg.sender)`) |
 | 8 | Milestone release via `LoanVault.releaseMilestone` | Yes | Lender (or pool owner for pool loans) must call; reverts if `directDisbursement = true` |
 | 9 | Repayment via `RevenueRouter.repayLoan` | Yes | — |
-| 10 | Pool accounting via `LiquidityPool.reconcileLoan` | Yes (permissionless) | Anyone can call; not automatic |
+| 10 | Pool accounting via `LiquidityPool.reconcileLoan` | Yes (permissionless) | Permissionless; any account may call |
 | 11 | Credit history update via `CreditRegistry.recordRepayment` | Yes (called by RevenueRouter) | — |
 
 ### Lifecycle Diagram
@@ -221,7 +221,7 @@ Valen separates identity, credit evaluation, loan state, capital management, rev
 | `CreditRegistry` | Per-agent credit records: `currentLimit` (from repayment history), `activityLimit` (from ERC-8183 attestations), outstanding exposure, default history. Authorized callers only. |
 | `LoanRegistry` | Loan storage and state machine (`Requested → Active → Repaid / Defaulted`). Validates proposals against credit limits, recipient approvals, milestone structure, and collateral rules. |
 | `LoanVault` | Loan funding and milestone disbursement. Supports both direct P2P funding (`fundLoan`) and pool-funded path (`fundFromPool`). Enforces `directDisbursement` flag for collateralized loans. |
-| `LiquidityPool` | Share-accounted USDC pool for pooled lending. `idleLedger + totalDeployed = totalAssets`. `reconcileLoan` is permissionless and must be called to finalize accounting after repayment. |
+| `LiquidityPool` | Share-accounted USDC pool for pooled lending. `idleLedger + totalDeployed = totalAssets`. `reconcileLoan` is a permissionless function that finalizes per-loan accounting in the pool. |
 | `CollateralVault` | Multi-asset collateral (V1: USDC and EURC at admin-set USD prices). LTV-checked at deposit. Released on repayment; seized to lender on default. |
 | `UnderwriterPool` | Protocol slot for underwriter-staked risk coverage. Underwriter reserves are locked per-loan and settled on repayment or default. |
 | `RecipientRegistry` | Allowlist of approved recipient addresses. All `permittedRecipients` and the loan's `creditWallet` must be registry-approved before a loan request is accepted. |
@@ -332,7 +332,7 @@ A loan proposal specifies principal, repayment amount, duration, collateral, mil
 
 ### 5. Pool-funded lending with share accounting
 
-`LiquidityPool` enables shared liquidity across multiple loans. Share price reflects `idleLedger + totalDeployed`. The 2% reserve fee is taken from the lender's share on each repayment. `reconcileLoan` is permissionless and must be called after repayment to finalize pool accounting.
+`LiquidityPool` enables shared liquidity across multiple loans. Share price reflects `idleLedger + totalDeployed`. The 2% reserve fee is taken from the lender's share on each repayment. `reconcileLoan` is a permissionless function that updates pool accounting for a completed loan.
 
 ---
 
