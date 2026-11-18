@@ -41,3 +41,10 @@ abd4225.patch
 
 # Local broadcast logs
 **/broadcast.log.json
+
+# Circle credentials, recovery files, local keystores, OS files
+.circle/
+recovery_file*
+keystore/
+keystores/
+.DS_Store

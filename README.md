@@ -352,9 +352,7 @@ cd valencredit
 
 ### Install dependencies
 
-```bash
-forge install
-```
+Solidity dependencies (`forge-std`, OpenZeppelin Contracts and Upgradeable, OpenZeppelin Foundry Upgrades) are vendored as regular files under `lib/`, so cloning the repository is enough. `forge install` is not required. (`.gitmodules` still lists these libraries as submodules, but no submodule links are recorded in the repository; see [Known Issues](#known-issues-and-limitations).)
 
 ### Compile
 
@@ -374,7 +372,7 @@ For verbose output:
 forge test -vvv
 ```
 
-The test suite covers 558 tests across unit, integration, and risk-regression files (see `test/`). Tests use `ERC1967Proxy` direct deployment; no FFI or external network calls are required.
+The test suite contains 575 tests in 27 suites (558 protocol tests plus 17 C-01 ownership-transfer tests), confirmed passing with `forge test` on 2026-11-18. Tests use `ERC1967Proxy` direct deployment and run in the local EVM; they do not fork or contact Arc Testnet.
 
 ### Read-only verification (no private key needed)
 
@@ -443,9 +441,168 @@ Valen is currently an experimental testnet implementation. Production deployment
 
 ## Operational Notes
 
-**There is no frontend.** Valen V1 is a smart-contract protocol. All interaction is via contract calls (Foundry `cast`, scripts, or SDK integration). A frontend is not yet implemented.
+**A dashboard frontend exists but is not production-ready.** `frontend/` is a React/Vite dashboard (Overview, Sandbox Agents, Agent Details, Lending Pool, Transactions, Integration) that reads data through the backend's `/api` proxy. It has not been built or run as part of the 2026-11-18 handoff, so its current working state is unverified. See [Development Handoff](#development-handoff).
 
-**No automated transaction submission.** The repository includes a backend (`backend/`) — a Fastify HTTP server with read-only API routes and on-chain event listeners for `LoanRequested`, `LoanFunded`, `LoanDefaulted`, and other events. The event listeners log to console only; the backend does not hold private keys or expose routes for state-changing operations. `fundFromPool`, `markDefault`, `releaseMilestone`, `reconcileLoan`, and similar calls require the contract owner or a registered keeper to submit transactions manually.
+**No automated transaction submission by the server.** The backend (`backend/`) is a Fastify HTTP server with read-only API routes, a loan-proposal preparation endpoint, and on-chain event listeners for `LoanRequested`, `LoanFunded`, `LoanDefaulted`, and other events. The listeners log to console only; the server does not hold private keys and exposes no state-changing routes. `fundFromPool`, `markDefault`, `releaseMilestone`, `reconcileLoan`, and similar calls require the contract owner or a registered keeper to submit transactions manually. The backend also contains two standalone terminal scripts (`backend/src/approveTestRecipient.ts`, `backend/src/testRequestLoan.ts`) that can send transactions if a deployer key is supplied via the environment; they are not part of the server.
+
+---
+
+## Development Handoff
+
+This section is a snapshot taken on **2026-11-18** so a new developer or agent (for example Muse) can continue without prior context. Everything here is either verified (and says how) or explicitly marked unverified. Nothing here is a production-readiness claim.
+
+### Implementation status
+
+| Area | Status | Evidence / notes |
+|---|---|---|
+| 11 UUPS contracts (`src/`) | Implemented; deployed on Arc Testnet | Addresses in [Deployment](#deployment); on-chain wiring in `docs/valen-v1-verification.md` |
+| Foundry tests (`test/`) | 575 passing, 0 failing, 27 suites | `forge test`, run 2026-11-18 |
+| Full lifecycle on testnet | One collateralized loan (loan 0) funded and repaid | 13 transactions in [On-Chain Evidence](#on-chain-evidence) |
+| Backend (`backend/`) | Implemented; not run in this handoff | Fastify read-only API, `POST /loans/prepare`, log-only event listeners, two vitest files (`backend/src/test/`) |
+| Frontend (`frontend/`) | Present; not built or run in this handoff | React 18 / Vite / wagmi dashboard with 6 screens; proxies `/api` to `localhost:3000`; no frontend tests |
+| C-01 ownership migration | **Tooling prepared; migration NOT executed** | See [C-01 status](#c-01-remediation-status) |
+| Independent security audit | None recorded in this repository | `docs/` contains internal read-only reviews only |
+| Mainnet | Not deployed, not prepared | Testnet only |
+| Concordium | **No Concordium code or integration exists in this repository** | The project targets Arc; any Concordium work would be new development |
+
+### Supported chains and deployment
+
+- **Arc Testnet only** (chain ID `5042002`, RPC `https://rpc.testnet.arc.io`). USDC `0x3600000000000000000000000000000000000000` (6 decimals as ERC-20; native gas view uses 18 decimals).
+- The 11 proxy addresses are in [Deployment](#deployment). They were verified on-chain at block 68,946,770 (2026-10-25).
+- **Current owner of all 11 proxies:** the deployer EOA `0xB0E8Ba6aFe21371AD4001e611224FC200FD10144`, re-checked read-only with `owner()` at block 72,828,557 (2026-11-18). No Safe exists and no ownership has been transferred.
+- Test collateral token: EURC `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a`, configured in `CollateralVault` at 1.08 USD.
+- Canonical Safe v1.4.1 infrastructure (factory `0x4e1DCf7AD4e460CfD30791CCC4F9c8a4f820ec67`, L2 singleton `0x29fcB43b46531BcA003ddC8FCB67FFE91900C762`) was confirmed to have code on Arc Testnet on 2026-10-25 via `eth_getCode`. This was not re-checked on 2026-11-18, and it does not mean any Safe instance exists.
+
+### Contracts and responsibilities
+
+See [Architecture](#architecture) for the full table. In short: `AgentRegistry` (identity) and `CreditRegistry` (credit limits) feed `LoanRegistry` (loan state machine). `LoanVault` and `LiquidityPool` move principal, `CollateralVault` and `UnderwriterPool` hold risk cover, `RevenueRouter` and `ReservePool` handle repayments and reserves, `RecipientRegistry` gates payout addresses, and `ActivityAttester` records ERC-8183 payment evidence. All 11 are `OwnableUpgradeable` + UUPS (OpenZeppelin v5.7.0), so the owner can upgrade every contract.
+
+### Integrations and dependencies
+
+| Dependency | Use | Status |
+|---|---|---|
+| Foundry (`forge`, `cast`) | Build, test, scripts | Used; `foundry.toml` sets `ffi = true` (required by OpenZeppelin Foundry Upgrades; keep in mind when running untrusted scripts) |
+| OpenZeppelin Contracts Upgradeable v5.7.0, OZ Foundry Upgrades, forge-std | Contracts and tests | Vendored in `lib/` |
+| ERC-8004 | Informational external identity reference stored per agent | Reference only; not used in credit logic |
+| ERC-8183 | `PaymentReleased` events attested via `ActivityAttester` | Attestation contract implemented; no production indexer exists |
+| Safe v1.4.1 | Planned owner for C-01 | Not deployed |
+| Backend: Fastify 5, viem 2, dotenv | API server | Declared in `backend/package.json` |
+| Frontend: React 18, Vite 6, wagmi 2, ConnectKit, Tailwind 3, viem 2 | Dashboard | Declared in `frontend/package.json`. The file also lists several Circle SDK packages from the project scaffold; their use by Valen code was not verified |
+
+### Install, build, test, run
+
+**Contracts**
+
+```bash
+forge build
+forge test            # 575 tests, local EVM only
+```
+
+**Backend** (Node.js; `npm` lockfile is committed)
+
+```bash
+cd backend
+cp .env.example .env     # fill in RPC and contract addresses; never commit .env
+npm install
+npm run dev              # tsx watch, default port 3000
+npm run typecheck
+npm test                 # vitest
+```
+
+Environment variable names are listed in `backend/.env.example` (`ARC_TESTNET_RPC_URL`, `PORT`, `HOST`, `LOG_LEVEL`, the 11 `*_ADDRESS` values, `EURC_ADDRESS`). `DEPLOYER_PRIVATE_KEY` is only for the two standalone admin scripts and must never be set for the server.
+
+**Frontend** (Bun; `bun.lock` committed)
+
+```bash
+cd frontend
+bun install
+bun run dev              # Vite; proxies /api to http://localhost:3000
+```
+
+None of the backend or frontend commands above were executed during this handoff.
+
+### Known issues and limitations
+
+- **CI is likely failing.** `.github/workflows/test.yml` runs `forge fmt --check`, which reports formatting differences in 52 existing files (checked 2026-11-18). The workflow also uses `submodules: recursive` although `lib/` is vendored with no submodule links. CI has not been run for this handoff.
+- **Formatting was deliberately not changed** in this handoff, to avoid touching contract sources.
+- `.gitmodules` is stale (see above). `lib/` also contains duplicate nested copies of OpenZeppelin, which inflates repository size.
+- `backend/` contains both `.env.example` and `env.example`; both are tracked. `.env.example` has a commented placeholder deployer-key line only (no real key; verified by decoding attempt).
+- `backend/src/config/arc.ts` uses explorer URL `https://testnet.arcscan.app`, while the documentation uses `https://explorer.testnet.arc.io`. Which is canonical has not been verified.
+- `frontend/package.json` scripts `deploy:self`, `compass:deploy`, `fetch:abi` and `check` reference `./scripts/...` files that do not exist inside `frontend/`.
+- `forge lint` reports two harmless `unsafe-typecast` notes in the new C-01 files; other existing warnings are in older tests.
+- Two live-deployment accounting items from the on-chain verification (pool reconciliation of loan 0 and the `RevenueRouter` V2 migration status) are documented in `docs/valen-v1-verification.md` and section 7 of `docs/valen-v1-audit.md`. They remain unresolved and must be reviewed before any state-changing action.
+
+### Outstanding audit findings
+
+`docs/valen-v1-audit.md` (internal, read-only review dated 2026-10-25) lists 2 Critical, 3 High, 6 Medium, 7 Low and 8 Informational items. Status as recorded there:
+
+| Severity | Open items (IDs) | Notes |
+|---|---|---|
+| Critical | C-01, C-02 | C-01: single EOA controls all admin and upgrade authority; remediation prepared, not executed. C-02: unset-reserve-pool silent skip; mitigated in the current deployment's wiring |
+| High | H-01, H-02, H-03 | Pool reconciliation race, reconcile-all gas/DoS at the active-loan cap, and reserve-skim migration state |
+| Medium | M-01, M-02, M-03, M-04, M-06 | Owner-set collateral prices with no staleness check, revocable underwriter commitments, mutable max LTV, recipient category check, pool replacement; M-05 recorded as addressed |
+| Low / Info | See report section 8 | Mix of open, by-design and addressed |
+
+Read the report before changing any contract. The full audit recommends independent third-party review before mainnet.
+
+### C-01 remediation status
+
+**Goal:** move ownership of all 11 proxies from the deployer EOA to a 2-of-3 Safe.
+
+**Prepared and committed**
+
+- `script/TransferOwnership.s.sol`: `preflightChecks()`, `run()`, `resume()`, `verifyTransfer()`. It checks all 11 proxy owners before any transfer, skips proxies already at the Safe, queues deployer-owned proxies, and aborts on any unexpected owner. Safe checks: code present, slot 0 and `masterCopy()` equal the expected L2 v1.4.1 singleton, threshold exactly 2, owner list exactly the three approved signers.
+- `test/TransferOwnership.t.sol`: 17 tests, local EVM only.
+- `AGENTS.md`: operational notes for the migration.
+
+**Not done**
+
+- No Safe has been created; no signer addresses have been collected or verified.
+- `SAFE_ADDRESS`, `SIGNER_1`, `SIGNER_2` and `SIGNER_3` are intentionally `address(0)`. Do not fill them in until the Safe and all three signers are independently verified. While unset, the script cannot proceed past its first check.
+- No `transferOwnership` transaction has been sent. No dry run against a real Safe has been performed.
+
+**Limitations (be precise about these)**
+
+- The slot-0 and `masterCopy()` checks are consistency checks, not proof the address is genuine Safe code. A purpose-built contract could pass them. Manual verification (deployment transaction came from the canonical factory; source inspected on the explorer) is required and is listed in the script header.
+- Only two tests (T14, T16) call the real script, and only to prove the `address(0)` guards. The remaining tests exercise a separate harness that mirrors the logic, or mocks. The real script's Safe checks, proxy checks, `run()`, `resume()` and post-transfer verification have never been executed by a test. They first run against real state during a live `preflightChecks()` dry run.
+- A test cannot prove "no transfer before the abort", because a revert rolls state back. That ordering rests on code review of `resume()`.
+- Inside `run()`/`resume()`, the post-broadcast owner reads occur in the script's local simulation. Confirm real results with transaction receipts and a standalone `verifyTransfer()`.
+- `transferOwnership` is single-step in the installed OpenZeppelin v5.7.0 contracts. A wrong Safe address would lock the protocol permanently.
+
+**Operational consequences after migration:** every `onlyOwner` call and every upgrade becomes a Safe transaction. `LoanVault.releaseMilestone` for pool-funded, non-direct-disbursement loans requires the Safe as caller (no keeper path); `fundFromPool` still accepts registered keepers.
+
+### Task list
+
+| Done | Outstanding |
+|---|---|
+| 11 contracts implemented and deployed to Arc Testnet | Create and verify the 2-of-3 Safe; collect verified signer addresses |
+| Collateralized loan lifecycle demonstrated on testnet (loan 0) | Fill the four placeholder constants only after verification |
+| On-chain verification report and internal audit report | Run `preflightChecks()` and a dry run against the real Safe |
+| C-01 script, tests and operating notes written | Execute the ownership migration (needs explicit owner approval) and run the post-migration Safe functional test |
+| 575 passing local tests | Address remaining audit findings (C-02, H-01 to H-03, Medium items) |
+| Backend read API and dashboard frontend written | Build, run and test backend and frontend; fix stale frontend scripts |
+| README and handoff documentation | Fix CI (`forge fmt`, submodule config); decide on explorer URL; independent audit before mainnet |
+| | Any Concordium Trusted Agents Hackathon work (no code exists yet) |
+
+### Repository layout
+
+```text
+src/            11 UUPS contracts and interfaces
+script/         Deploy, UpgradeV4, UpgradeRevenueRouter, TransferOwnership
+test/           Foundry tests (27 suites)
+backend/        Fastify API, ABIs, event listeners, vitest tests
+frontend/       React/Vite dashboard
+docs/           Verification report, audit reports, pitch material
+lib/            Vendored Solidity dependencies
+AGENTS.md       Notes for agents and operators (addresses, C-01 procedure)
+```
+
+### Rules for anyone continuing this work
+
+- Never commit `.env` files, private keys, seed phrases, API keys, Circle recovery files or credentialed RPC URLs. `.gitignore` excludes the common cases; check before every commit.
+- Do not broadcast transactions, deploy, upgrade, or transfer ownership without the project owner's explicit approval.
+- Do not describe unfinished features as complete or invent deployment details.
+- Re-run `forge test` after any change to `src/`, `script/` or `test/`.
 
 ---
 
@@ -506,6 +663,8 @@ See the repository's `LICENSE` file for the applicable license terms.
 
 - **GitHub:** [https://github.com/Web3smallie/valencredit](https://github.com/Web3smallie/valencredit)
 - **Verification Report:** [docs/valen-v1-verification.md](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-verification.md)
+- **Technical Audit Report (internal):** [docs/valen-v1-audit.md](https://github.com/Web3smallie/valencredit/blob/main/docs/valen-v1-audit.md)
+- **Agent / operator notes:** [AGENTS.md](https://github.com/Web3smallie/valencredit/blob/main/AGENTS.md)
 - **Arc Testnet Explorer:** [https://explorer.testnet.arc.io](https://explorer.testnet.arc.io)
 - **Arc Testnet RPC:** `https://rpc.testnet.arc.io`
 - **USDC:** [https://www.circle.com/usdc](https://www.circle.com/usdc)
